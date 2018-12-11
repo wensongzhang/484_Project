@@ -11,7 +11,7 @@ from PIL import Image  # for loading images as YCbCr format
 import scipy.misc
 import scipy.ndimage
 
-times=1
+times=10000
 rate=1e-4
 photo_size=33
 tag_size=21
@@ -48,15 +48,15 @@ saver = tf.train.Saver()
 
 def calculate(sub_photo, weight=3):
     if len(sub_photo.shape) == 3:
-        row, col, _ = sub_photo.shape
-        row = row - np.mod(row, weight)
-        col = col - np.mod(col, weight)
-        sub_photo = sub_photo[0:row, 0:col, :]
+        hei, wid, _ = sub_photo.shape
+        hei = hei - np.mod(hei, weight)
+        wid = wid - np.mod(wid, weight)
+        sub_photo = sub_photo[0:hei, 0:wid, :]
     else:
-        row, col = sub_photo.shape
-        row = row - np.mod(row, weight)
-        col = col - np.mod(col, weight)
-        sub_photo = sub_photo[0:row, 0:col]
+        hei, wid = sub_photo.shape
+        hei = hei - np.mod(hei, weight)
+        wid = wid - np.mod(wid, weight)
+        sub_photo = sub_photo[0:hei, 0:wid]
     return sub_photo
 
 def pre_processing(path, weight=3):
@@ -78,9 +78,6 @@ def read_checkpoint(cp_dir):
     if point and point.model_checkpoint_path:
         ckpt_name = os.path.basename(point.model_checkpoint_path)
         saver.restore(sess, os.path.join(cp_dir, ckpt_name))
-        return True
-    else:
-        return False
 
 def train_initialization():
     # Preparing data
@@ -97,12 +94,12 @@ def train_initialization():
         pre_input, pre_tags = pre_processing(data[i], weight)
 
         if len(pre_input.shape) == 3:
-            row, col, _ = pre_input.shape
+            hei, wid, _ = pre_input.shape
         else:
-            row, col = pre_input.shape
+            hei, wid = pre_input.shape
 
-        for x in range(0, row-photo_size+1, stride):
-            for y in range(0, col-photo_size+1, stride):
+        for x in range(0, hei-photo_size+1, stride):
+            for y in range(0, wid-photo_size+1, stride):
                 re_data = pre_input[x:x+photo_size, y:y+photo_size] # [33 x 33]
                 re_tag = pre_tags[x+int(tire):x+int(tire)+tag_size, y+int(tire):y+int(tire)+tag_size] # [21 x 21]
                 re_data = re_data.reshape([photo_size, photo_size, 1])  
@@ -129,15 +126,15 @@ def test_initialization():
     input_, label_ = pre_processing(data[2], weight)
 
     if len(input_.shape) == 3:
-        row, col, _ = input_.shape
+        hei, wid, _ = input_.shape
     else:
-        row, col = input_.shape
+        hei, wid = input_.shape
 
     # Numbers of sub-images in height and width of image are needed to compute merge operation.
     vec1 = vec2 = 0 
-    for x in range(0, row-photo_size+1, stride):
+    for x in range(0, hei-photo_size+1, stride):
         vec1 += 1; vec2 = 0
-        for y in range(0, col-photo_size+1, stride):
+        for y in range(0, wid-photo_size+1, stride):
             vec2 += 1
             re_data = input_[x:x+photo_size, y:y+photo_size] # [33 x 33]
             re_tag = label_[x+int(tire):x+int(tire)+tag_size, y+int(tire):y+int(tire)+tag_size] # [21 x 21]
@@ -157,7 +154,7 @@ def train(sess, cp_dir):
     train_initialization()
     # read_checkpoint(cp_dir)
     buff = 0
-    start_time = time.time()
+    #start_time = time.time()
     data_dir = os.path.join('./{}'.format(cp_dir), "train.h5")
     
     # Reading Data
@@ -181,14 +178,15 @@ def train(sess, cp_dir):
             _, err = sess.run([train_gradient_descent, loss], feed_dict={photo_holder: train_pick, tag_holder: train_tags})
 
             if buff % 10 == 0:
-                print("%d\tstep: %d\t time: %f\t loss: %f" % ((ep+1), buff, time.time()-start_time, err))
+                # print("%d\tstep: %d\t time: %f\t loss: %f" % ((ep+1), buff, time.time()-start_time, err))
+                print("%d\tstep: %d\t loss: %f" % ((ep+1), buff, err))
 
-            if buff % 500 == 0:
-                model_name = "SRCNN.model"
-                model_dir = "%s_%s" % ("srcnn", tag_size)
-                cp_dir = os.path.join(cp_dir, model_dir)
-                if not os.path.exists(cp_dir):
-                    os.makedirs(cp_dir)
+            if buff % 1000 == 0:
+                cp_dir = 'checkpoint/srcnn_21'
+                model_name = "%s_%s" % ("SRCNN.model-srcnn", tag_size)
+                # cp_dir = os.path.join(cp_dir, model_dir)
+                # if not os.path.exists(cp_dir):
+                 #   os.makedirs(cp_dir)
                 saver.save(sess, os.path.join(cp_dir, model_name), global_step=buff)
 
 def test(sess, cp_dir) :
@@ -208,12 +206,12 @@ def test(sess, cp_dir) :
     result = pred.eval({photo_holder: train_data_set, tag_holder: train_tag_set})
     # Merging
     size = [v1, v2]
-    row, col = result.shape[1], result.shape[2]
-    photo_matrix = np.zeros((row*size[0], col*size[1], 1))
+    hei, wid = result.shape[1], result.shape[2]
+    photo_matrix = np.zeros((hei*size[0], wid*size[1], 1))
     for idx, image in enumerate(result):
         i = idx % size[1]
         j = idx // size[1]
-        photo_matrix[j*row:j*row+row, i*col:i*col+col, :] = image
+        photo_matrix[j*hei:j*hei+hei, i*wid:i*wid+wid, :] = image
     result = photo_matrix
     result = result.squeeze()
     photo_address = os.path.join(os.getcwd(), result_addr)
