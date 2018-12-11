@@ -11,7 +11,7 @@ from PIL import Image  # for loading images as YCbCr format
 import scipy.misc
 import scipy.ndimage
 
-times=10000
+times=20000
 rate=1e-4
 photo_size=33
 tag_size=21
@@ -38,6 +38,7 @@ noise = {
     'b3': tf.Variable(tf.zeros([1]), name='b3')
 }
 
+# CNN
 conv1 = tf.nn.relu(tf.nn.conv2d(photo_holder, degree['w1'], strides=[1,1,1,1], padding='VALID') + noise['b1'])
 conv2 = tf.nn.relu(tf.nn.conv2d(conv1, degree['w2'], strides=[1,1,1,1], padding='VALID') + noise['b2'])
 pred = tf.nn.conv2d(conv2, degree['w3'], strides=[1,1,1,1], padding='VALID') + noise['b3']
@@ -46,6 +47,7 @@ pred = tf.nn.conv2d(conv2, degree['w3'], strides=[1,1,1,1], padding='VALID') + n
 loss = tf.reduce_mean(tf.square(tag_holder - pred))
 saver = tf.train.Saver()
 
+# To calculate the scale of the org image
 def calculate(sub_photo, weight=3):
     if len(sub_photo.shape) == 3:
         hei, wid, _ = sub_photo.shape
@@ -59,6 +61,7 @@ def calculate(sub_photo, weight=3):
         sub_photo = sub_photo[0:hei, 0:wid]
     return sub_photo
 
+# Pre-processing of data
 def pre_processing(path, weight=3):
   pre_photo = scipy.misc.imread(path, flatten=True, mode='YCbCr').astype(np.float)
   pre_tag = calculate(pre_photo, weight)
@@ -69,6 +72,7 @@ def pre_processing(path, weight=3):
 
   return pre_result, pre_tag
 
+# Loading ckpt
 def read_checkpoint(cp_dir):
     # print("Reading checkpoints...")
     m_addr = "%s_%s" % ("srcnn", tag_size)
@@ -79,16 +83,17 @@ def read_checkpoint(cp_dir):
         ckpt_name = os.path.basename(point.model_checkpoint_path)
         saver.restore(sess, os.path.join(cp_dir, ckpt_name))
 
+# Set up train method
 def train_initialization():
     # Preparing data
     train_data_set="Train"
     filenames = os.listdir(train_data_set)
     data_addr = os.path.join(os.getcwd(), train_data_set)
-    data = glob.glob(os.path.join(data_addr, "*.bmp"))
+    data = glob.glob(os.path.join(data_addr, "*.png"))
 
     data_sequence = []
     tag_sequence = []
-    tire = abs(photo_size - tag_size) / 2 # 6
+    tire = abs(photo_size - tag_size) / 2 
     for i in range(len(data)):
         # Preprocessing
         pre_input, pre_tags = pre_processing(data[i], weight)
@@ -100,7 +105,7 @@ def train_initialization():
 
         for x in range(0, hei-photo_size+1, stride):
             for y in range(0, wid-photo_size+1, stride):
-                re_data = pre_input[x:x+photo_size, y:y+photo_size] # [33 x 33]
+                re_data = pre_input[x:x+photo_size, y:y+photo_size] 
                 re_tag = pre_tags[x+int(tire):x+int(tire)+tag_size, y+int(tire):y+int(tire)+tag_size] # [21 x 21]
                 re_data = re_data.reshape([photo_size, photo_size, 1])  
                 re_tag = re_tag.reshape([tag_size, tag_size, 1])
@@ -112,15 +117,16 @@ def train_initialization():
         editor.create_dataset('data', data=np.asarray(data_sequence))
         editor.create_dataset('tag', data=np.asarray(tag_sequence))
 
+# Set up test method
 def test_initialization():
   # Preparing data
     test_data_set="Test"
-    data_addr = os.path.join(os.sep, (os.path.join(os.getcwd(), test_data_set)), "bmp")
-    data = glob.glob(os.path.join(data_addr, "*.bmp"))
+    data_addr = os.path.join(os.sep, (os.path.join(os.getcwd(), test_data_set)), "test5")
+    data = glob.glob(os.path.join(data_addr, "*.png"))
 
     data_sequence = []
     tag_sequence = []
-    tire = abs(photo_size - tag_size) / 2 # 6
+    tire = abs(photo_size - tag_size) / 2 
 
     # Preprocessing
     input_, label_ = pre_processing(data[2], weight)
@@ -130,13 +136,12 @@ def test_initialization():
     else:
         hei, wid = input_.shape
 
-    # Numbers of sub-images in height and width of image are needed to compute merge operation.
     vec1 = vec2 = 0 
     for x in range(0, hei-photo_size+1, stride):
         vec1 += 1; vec2 = 0
         for y in range(0, wid-photo_size+1, stride):
             vec2 += 1
-            re_data = input_[x:x+photo_size, y:y+photo_size] # [33 x 33]
+            re_data = input_[x:x+photo_size, y:y+photo_size] 
             re_tag = label_[x+int(tire):x+int(tire)+tag_size, y+int(tire):y+int(tire)+tag_size] # [21 x 21]
             re_data = re_data.reshape([photo_size, photo_size, 1])  
             re_tag = re_tag.reshape([tag_size, tag_size, 1])
@@ -162,23 +167,23 @@ def train(sess, cp_dir):
         train_data_set = np.array(editor.get('data'))
         train_tag_set = np.array(editor.get('tag'))
 
-    # Stochastic gradient descent with the standard backpropagation
+    # gradient descent Opt
     train_gradient_descent = tf.train.GradientDescentOptimizer(rate).minimize(loss)
     tf.initialize_all_variables().run()
     read_checkpoint(cp_dir)
     print("Training...")
     for ep in range(times):
-        # Run by batch images
+        # Run alg
         batch_idxs = len(train_data_set) // pick
         for idx in range(0, batch_idxs):        
             train_pick = train_data_set[idx*pick : (idx+1)*pick]
             train_tags = train_tag_set[idx*pick : (idx+1)*pick]
 
             buff += 1
+            # get the error
             _, err = sess.run([train_gradient_descent, loss], feed_dict={photo_holder: train_pick, tag_holder: train_tags})
 
             if buff % 10 == 0:
-                # print("%d\tstep: %d\t time: %f\t loss: %f" % ((ep+1), buff, time.time()-start_time, err))
                 print("%d\tstep: %d\t loss: %f" % ((ep+1), buff, err))
 
             if buff % 1000 == 0:
